@@ -36,6 +36,8 @@ pub struct App {
     items: Vec<InstalledItem>,
     list_state: ListState,
     status_line: String,
+    search_mode: bool,
+    search_query: String,
     show_info_popup: bool,
     info_popup_text: String,
 }
@@ -50,6 +52,8 @@ impl App {
             items: Vec::new(),
             list_state: ListState::default().with_selected(Some(0)),
             status_line: String::from("Loading installed packages..."),
+            search_mode: false,
+            search_query: String::new(),
             show_info_popup: false,
             info_popup_text: String::new(),
         };
@@ -72,10 +76,47 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, event: KeyEvent) {
+        if self.show_info_popup {
+            match event.code {
+                KeyCode::Char('i') | KeyCode::Esc => self.show_info_popup = false,
+                KeyCode::Char('q') => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
+
+        if self.search_mode {
+            match event.code {
+                KeyCode::Enter | KeyCode::Esc => self.search_mode = false,
+                KeyCode::Char('j') | KeyCode::Down => self.select_next(),
+                KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                    self.clamp_selection_to_visible_items();
+                }
+                KeyCode::Char(c) => {
+                    self.search_query.push(c);
+                    self.clamp_selection_to_visible_items();
+                }
+                _ => {}
+            }
+
+            let visible_count = self.visible_item_indices().len();
+            self.status_line = format!(
+                "Search: '{}' ({} results)",
+                self.search_query, visible_count
+            );
+            return;
+        }
+
         match event.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.select_next(),
             KeyCode::Char('k') | KeyCode::Up => self.select_previous(),
+            KeyCode::Char('/') => {
+                self.search_mode = true;
+                self.status_line = String::from("Search mode: type to filter, Enter/Esc to finish");
+            }
             KeyCode::Char('1') => {
                 self.filter = InstalledFilter::All;
                 self.request_list();
@@ -131,24 +172,58 @@ impl App {
         let menu = List::new(menu_items).block(Block::default().title("Views / Functions").borders(Borders::ALL));
         frame.render_widget(menu, left_area);
 
+        let [search_area, list_area] =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(right_area);
+
+        let search_hint = if self.search_mode {
+            format!("/{}", self.search_query)
+        } else if self.search_query.is_empty() {
+            String::from("Press / to search")
+        } else {
+            format!("Filter: {}", self.search_query)
+        };
+
+        let search = Paragraph::new(search_hint).block(
+            Block::default()
+                .title("Search")
+                .borders(Borders::ALL),
+        );
+        frame.render_widget(search, search_area);
+
+        let visible_indices = self.visible_item_indices();
+
         let rows: Vec<ListItem> = self
             .items
             .iter()
-            .map(|item| ListItem::new(format!("{:<28} {:<5} {}", item.name, item.kind, item.version)))
+            .enumerate()
+            .filter(|(idx, _)| visible_indices.contains(idx))
+            .map(|(_, item)| ListItem::new(format!("{:<28} {:<5} {}", item.name, item.kind, item.version)))
             .collect();
+
+        let rows = if rows.is_empty() {
+            vec![ListItem::new("No matching packages".dim())]
+        } else {
+            rows
+        };
 
         let list = List::new(rows)
             .block(
                 Block::default()
-                    .title("Installed Packages")
+                    .title(format!(
+                        "Installed Packages ({}/{})",
+                        visible_indices.len(),
+                        self.items.len()
+                    ))
                     .title_bottom(self.status_line.clone())
                     .borders(Borders::ALL),
             )
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             .highlight_symbol("> ");
-        frame.render_stateful_widget(list, right_area, &mut self.list_state);
+        frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
-        let help = Paragraph::new("q: Quit  j/k or Arrows: Move  i: Info Popup  1/2/3: Switch View  r: Refresh")
+        let help = Paragraph::new(
+            "q: Quit  j/k or Arrows: Move  i: Info Popup  /: Search  Enter/Esc: End Search  1/2/3: Switch View  r: Refresh",
+        )
             .style(Style::default().add_modifier(Modifier::DIM));
         frame.render_widget(help, help_area);
 
@@ -183,6 +258,8 @@ impl App {
             } else {
                 self.status_line = format!("Loading info for {}...", item.name);
             }
+        } else {
+            self.status_line = String::from("No package selected");
         }
     }
 
@@ -236,38 +313,77 @@ impl App {
         self.items
             .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
+        self.clamp_selection_to_visible_items();
+        let visible_count = self.visible_item_indices().len();
+
         if self.items.is_empty() {
             self.list_state.select(None);
             self.status_line = String::from("No installed packages found");
         } else {
-            let selected = self.list_state.selected().unwrap_or(0).min(self.items.len() - 1);
-            self.list_state.select(Some(selected));
-            self.status_line = format!("{} installed packages", self.items.len());
+            self.status_line = format!(
+                "{} installed packages ({} visible)",
+                self.items.len(),
+                visible_count
+            );
         }
     }
 
     fn selected_item(&self) -> Option<&InstalledItem> {
-        self.list_state.selected().and_then(|i| self.items.get(i))
+        let idx = self.list_state.selected()?;
+        let visible_indices = self.visible_item_indices();
+        let item_idx = *visible_indices.get(idx)?;
+        self.items.get(item_idx)
     }
 
     fn select_next(&mut self) {
-        if self.items.is_empty() {
+        let len = self.visible_item_indices().len();
+        if len == 0 {
             self.list_state.select(None);
             return;
         }
         let i = self.list_state.selected().unwrap_or(0);
-        let next = if i >= self.items.len() - 1 { 0 } else { i + 1 };
+        let next = if i >= len - 1 { 0 } else { i + 1 };
         self.list_state.select(Some(next));
     }
 
     fn select_previous(&mut self) {
-        if self.items.is_empty() {
+        let len = self.visible_item_indices().len();
+        if len == 0 {
             self.list_state.select(None);
             return;
         }
         let i = self.list_state.selected().unwrap_or(0);
-        let prev = if i == 0 { self.items.len() - 1 } else { i - 1 };
+        let prev = if i == 0 { len - 1 } else { i - 1 };
         self.list_state.select(Some(prev));
+    }
+
+    fn visible_item_indices(&self) -> Vec<usize> {
+        let query = self.search_query.trim().to_lowercase();
+        self.items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                if query.is_empty()
+                    || item.name.to_lowercase().contains(&query)
+                    || item.version.to_lowercase().contains(&query)
+                {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn clamp_selection_to_visible_items(&mut self) {
+        let len = self.visible_item_indices().len();
+        if len == 0 {
+            self.list_state.select(None);
+            return;
+        }
+
+        let selected = self.list_state.selected().unwrap_or(0).min(len - 1);
+        self.list_state.select(Some(selected));
     }
 }
 
