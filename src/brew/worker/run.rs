@@ -65,7 +65,8 @@ pub fn run_list(option: ListOption) -> Result<BrewList, CommandError> {
 }
 
 pub fn run_outdated() -> Result<String, CommandError> {
-    run_text_command(["outdated"])
+    let Output { stdout, .. } = Command::new("brew").args(["outdated"]).output()?;
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 pub fn run_update() -> Result<String, CommandError> {
