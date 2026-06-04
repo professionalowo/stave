@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use super::worker;
+use super::worker::{Command, Response};
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{DefaultTerminal, Frame};
@@ -8,14 +8,14 @@ use ratatui::{DefaultTerminal, Frame};
 #[derive(Debug)]
 pub struct App {
     should_quit: bool,
-    command_tx: mpsc::Sender<worker::Command>,
-    output_rx: mpsc::Receiver<String>,
+    command_tx: mpsc::Sender<Command>,
+    output_rx: mpsc::Receiver<Response>,
 }
 
 impl App {
     pub fn new(
-        command_tx: mpsc::Sender<worker::Command>,
-        output_rx: mpsc::Receiver<String>,
+        command_tx: mpsc::Sender<Command>,
+        output_rx: mpsc::Receiver<Response>,
     ) -> Self {
         Self {
             should_quit: false,

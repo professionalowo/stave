@@ -21,3 +21,6 @@ pub struct Cask {
     pub versions: Vec<String>,
     pub pinned_version: Option<String>
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Info {}

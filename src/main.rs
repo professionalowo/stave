@@ -8,10 +8,10 @@ mod brew;
 
 fn main() -> Result<()> {
     let (main_tx, main_rx) = mpsc::channel::<worker::Command>();
-    let (worker_tx, worker_rx) = mpsc::channel::<String>();
+    let (worker_tx, worker_rx) = mpsc::channel::<worker::Response>();
     let worker_handle = thread::spawn(move || {
         let mut worker = worker::Worker::new(main_rx, worker_tx);
-        worker.run();
+        worker.run().expect("Worker thread failed");
     });
     color_eyre::install()?;
     let terminal = ratatui::init();
