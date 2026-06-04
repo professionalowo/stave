@@ -1,17 +1,22 @@
 use std::{sync::mpsc, time::Duration};
 
-use crate::brew::{
-    bindings::{BrewList, Info, InfoEntry},
-    worker::{Command, ListOption, Response},
+use crate::{
+    app::theme::Theme,
+    brew::{
+        bindings::{BrewList, Info, InfoEntry},
+        worker::{Command, ListOption, Response},
+    },
 };
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::Stylize,
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
+
+mod theme;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum InstalledFilter {
@@ -38,7 +43,7 @@ pub struct App {
     should_quit: bool,
     command_tx: mpsc::Sender<Command>,
     output_rx: mpsc::Receiver<Response>,
-    supports_color: bool,
+    theme: Theme,
     active_view: ActiveView,
     filter: InstalledFilter,
     items: Vec<InstalledItem>,
@@ -56,7 +61,7 @@ impl App {
             should_quit: false,
             command_tx,
             output_rx,
-            supports_color: terminal_supports_color(),
+            theme: Theme::load(terminal_supports_color()),
             active_view: ActiveView::Installed,
             filter: InstalledFilter::All,
             items: Vec::new(),
@@ -163,14 +168,17 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let [header_area, content_area, help_area] =
-            Layout::vertical([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
-                .areas(frame.area());
+        let [header_area, content_area, help_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
 
         let header = Paragraph::new("Stave")
             .centered()
             .bold()
-            .style(self.brand_style())
+            .style(self.theme.header_style())
             .block(Block::default().borders(Borders::BOTTOM));
         frame.render_widget(header, header_area);
 
@@ -183,33 +191,46 @@ impl App {
                 "Installed (All)",
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::All,
             ))
-            .style(self.sidebar_item_style(
+            .style(self.theme.sidebar_style(
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::All,
             )),
             ListItem::new(sidebar_label(
                 "2",
                 "Installed (Formulae)",
-                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Formula,
+                self.active_view == ActiveView::Installed
+                    && self.filter == InstalledFilter::Formula,
             ))
-            .style(self.sidebar_item_style(
-                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Formula,
+            .style(self.theme.sidebar_style(
+                self.active_view == ActiveView::Installed
+                    && self.filter == InstalledFilter::Formula,
             )),
             ListItem::new(sidebar_label(
                 "3",
                 "Installed (Casks)",
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Cask,
             ))
-            .style(self.sidebar_item_style(
+            .style(self.theme.sidebar_style(
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Cask,
             )),
             ListItem::new(" "),
-            ListItem::new(sidebar_label("o", "Outdated", self.active_view == ActiveView::Outdated))
-                .style(self.sidebar_item_style(self.active_view == ActiveView::Outdated)),
-            ListItem::new("u Update").style(self.sidebar_item_style(false)),
-            ListItem::new("g Upgrade").style(self.sidebar_item_style(false)),
-            ListItem::new("G Upgrade selected").style(self.sidebar_item_style(false)),
+            ListItem::new(sidebar_label(
+                "o",
+                "Outdated",
+                self.active_view == ActiveView::Outdated,
+            ))
+            .style(
+                self.theme
+                    .sidebar_style(self.active_view == ActiveView::Outdated),
+            ),
+            ListItem::new("u Update").style(self.theme.sidebar_style(false)),
+            ListItem::new("g Upgrade").style(self.theme.sidebar_style(false)),
+            ListItem::new("G Upgrade selected").style(self.theme.sidebar_style(false)),
         ];
-        let menu = List::new(menu_items).block(Block::default().title("Views / Functions").borders(Borders::ALL));
+        let menu = List::new(menu_items).block(
+            Block::default()
+                .title("Views / Functions")
+                .borders(Borders::ALL),
+        );
         frame.render_widget(menu, left_area);
 
         let [search_area, list_area] =
@@ -226,7 +247,7 @@ impl App {
         let search = Paragraph::new(search_hint).block(
             Block::default()
                 .title("Search")
-                .style(self.muted_style())
+                .style(self.theme.accent_style())
                 .borders(Borders::ALL),
         );
         frame.render_widget(search, search_area);
@@ -238,7 +259,12 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(idx, _)| visible_indices.contains(idx))
-            .map(|(_, item)| ListItem::new(format!("{:<28} {:<5} {}", item.name, item.kind, item.version)))
+            .map(|(_, item)| {
+                ListItem::new(format!(
+                    "{:<28} {:<5} {}",
+                    item.name, item.kind, item.version
+                ))
+            })
             .collect();
 
         let rows = if rows.is_empty() {
@@ -259,14 +285,14 @@ impl App {
                     .title_bottom(self.status_line.clone())
                     .borders(Borders::ALL),
             )
-            .highlight_style(self.selection_style())
+            .highlight_style(self.theme.selection_style())
             .highlight_symbol("> ");
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
         let help = Paragraph::new(
             "q: Quit  j/k or Arrows: Move  i: Info Popup  /: Search  Enter/Esc: End Search  1/2/3: Installed Filters  o: Outdated  u: Update  g: Upgrade all  G: Upgrade selected  r: Refresh",
         )
-            .style(self.muted_style());
+            .style(self.theme.accent_style());
         frame.render_widget(help, help_area);
 
         if self.show_info_popup {
@@ -342,7 +368,11 @@ impl App {
 
     fn request_info_for_selected(&mut self) {
         if let Some(item) = self.selected_item() {
-            if self.command_tx.send(Command::Info(item.name.clone())).is_err() {
+            if self
+                .command_tx
+                .send(Command::Info(item.name.clone()))
+                .is_err()
+            {
                 self.status_line = String::from("Failed to send info command to worker");
             } else {
                 self.status_line = format!("Loading info for {}...", item.name);
@@ -533,45 +563,6 @@ impl App {
         match self.active_view {
             ActiveView::Installed => "Installed Packages",
             ActiveView::Outdated => "Outdated Packages",
-        }
-    }
-
-    fn brand_style(&self) -> Style {
-        if self.supports_color {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().add_modifier(Modifier::BOLD)
-        }
-    }
-
-    fn muted_style(&self) -> Style {
-        if self.supports_color {
-            Style::default().fg(Color::Gray)
-        } else {
-            Style::default().add_modifier(Modifier::DIM)
-        }
-    }
-
-    fn selection_style(&self) -> Style {
-        if self.supports_color {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Rgb(198, 224, 214))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().add_modifier(Modifier::REVERSED)
-        }
-    }
-
-    fn sidebar_item_style(&self, active: bool) -> Style {
-        if !self.supports_color {
-            return Style::default();
-        }
-
-        if active {
-            Style::default().fg(Color::Rgb(248, 232, 164)).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Gray)
         }
     }
 
