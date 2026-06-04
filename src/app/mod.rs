@@ -27,11 +27,18 @@ struct InstalledItem {
     kind: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ActiveView {
+    Installed,
+    Outdated,
+}
+
 #[derive(Debug)]
 pub struct App {
     should_quit: bool,
     command_tx: mpsc::Sender<Command>,
     output_rx: mpsc::Receiver<Response>,
+    active_view: ActiveView,
     filter: InstalledFilter,
     items: Vec<InstalledItem>,
     list_state: ListState,
@@ -48,6 +55,7 @@ impl App {
             should_quit: false,
             command_tx,
             output_rx,
+            active_view: ActiveView::Installed,
             filter: InstalledFilter::All,
             items: Vec::new(),
             list_state: ListState::default().with_selected(Some(0)),
@@ -118,18 +126,28 @@ impl App {
                 self.status_line = String::from("Search mode: type to filter, Enter/Esc to finish");
             }
             KeyCode::Char('1') => {
+                self.active_view = ActiveView::Installed;
                 self.filter = InstalledFilter::All;
                 self.request_list();
             }
             KeyCode::Char('2') => {
+                self.active_view = ActiveView::Installed;
                 self.filter = InstalledFilter::Formula;
                 self.request_list();
             }
             KeyCode::Char('3') => {
+                self.active_view = ActiveView::Installed;
                 self.filter = InstalledFilter::Cask;
                 self.request_list();
             }
             KeyCode::Char('r') => self.request_list(),
+            KeyCode::Char('o') => {
+                self.active_view = ActiveView::Outdated;
+                self.request_outdated();
+            }
+            KeyCode::Char('u') => self.request_update(),
+            KeyCode::Char('g') => self.request_upgrade(),
+            KeyCode::Char('G') => self.request_upgrade_selected(),
             KeyCode::Char('i') => {
                 if self.show_info_popup {
                     self.show_info_popup = false;
@@ -157,17 +175,26 @@ impl App {
             Layout::horizontal([Constraint::Length(28), Constraint::Min(0)]).areas(content_area);
 
         let menu_items = vec![
-            ListItem::new(sidebar_label("1", "Installed (All)", self.filter == InstalledFilter::All)),
+            ListItem::new(sidebar_label(
+                "1",
+                "Installed (All)",
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::All,
+            )),
             ListItem::new(sidebar_label(
                 "2",
                 "Installed (Formulae)",
-                self.filter == InstalledFilter::Formula,
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Formula,
             )),
-            ListItem::new(sidebar_label("3", "Installed (Casks)", self.filter == InstalledFilter::Cask)),
+            ListItem::new(sidebar_label(
+                "3",
+                "Installed (Casks)",
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Cask,
+            )),
             ListItem::new(" "),
-            ListItem::new("Outdated (todo)".dim()),
-            ListItem::new("Search (todo)".dim()),
-            ListItem::new("Cleanup (todo)".dim()),
+            ListItem::new(sidebar_label("o", "Outdated", self.active_view == ActiveView::Outdated)),
+            ListItem::new("u Update"),
+            ListItem::new("g Upgrade"),
+            ListItem::new("G Upgrade selected"),
         ];
         let menu = List::new(menu_items).block(Block::default().title("Views / Functions").borders(Borders::ALL));
         frame.render_widget(menu, left_area);
@@ -210,7 +237,8 @@ impl App {
             .block(
                 Block::default()
                     .title(format!(
-                        "Installed Packages ({}/{})",
+                        "{} ({}/{})",
+                        self.current_list_title(),
                         visible_indices.len(),
                         self.items.len()
                     ))
@@ -222,7 +250,7 @@ impl App {
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
         let help = Paragraph::new(
-            "q: Quit  j/k or Arrows: Move  i: Info Popup  /: Search  Enter/Esc: End Search  1/2/3: Switch View  r: Refresh",
+            "q: Quit  j/k or Arrows: Move  i: Info Popup  /: Search  Enter/Esc: End Search  1/2/3: Installed Filters  o: Outdated  u: Update  g: Upgrade all  G: Upgrade selected  r: Refresh",
         )
             .style(Style::default().add_modifier(Modifier::DIM));
         frame.render_widget(help, help_area);
@@ -251,6 +279,53 @@ impl App {
         }
     }
 
+    fn request_outdated(&mut self) {
+        if self.command_tx.send(Command::Outdated).is_err() {
+            self.status_line = String::from("Failed to send outdated command to worker");
+        } else {
+            self.status_line = String::from("Loading outdated packages...");
+        }
+    }
+
+    fn request_update(&mut self) {
+        if self.command_tx.send(Command::Update).is_err() {
+            self.status_line = String::from("Failed to send update command to worker");
+        } else {
+            self.status_line = String::from("Running brew update...");
+        }
+    }
+
+    fn request_upgrade(&mut self) {
+        if self.command_tx.send(Command::Upgrade).is_err() {
+            self.status_line = String::from("Failed to send upgrade command to worker");
+        } else {
+            self.status_line = String::from("Running brew upgrade...");
+        }
+    }
+
+    fn request_upgrade_selected(&mut self) {
+        let Some(item) = self.selected_item() else {
+            self.status_line = String::from("No package selected");
+            return;
+        };
+
+        let name = item.name.clone();
+        let is_cask = item.kind == "C";
+
+        if self
+            .command_tx
+            .send(Command::UpgradePackage {
+                name: name.clone(),
+                is_cask,
+            })
+            .is_err()
+        {
+            self.status_line = String::from("Failed to send package upgrade command to worker");
+        } else {
+            self.status_line = format!("Upgrading {}...", name);
+        }
+    }
+
     fn request_info_for_selected(&mut self) {
         if let Some(item) = self.selected_item() {
             if self.command_tx.send(Command::Info(item.name.clone())).is_err() {
@@ -271,6 +346,26 @@ impl App {
                     self.info_popup_text = format_info(info);
                     self.show_info_popup = true;
                 }
+                Ok(Response::Outdated(output)) => {
+                    self.apply_outdated_output(output);
+                }
+                Ok(Response::UpdateResult(output)) => {
+                    self.info_popup_text = output;
+                    self.show_info_popup = true;
+                    self.status_line = String::from("brew update finished");
+                }
+                Ok(Response::UpgradeResult(output)) => {
+                    self.info_popup_text = output;
+                    self.show_info_popup = true;
+                    self.status_line = String::from("brew upgrade finished");
+                    self.refresh_active_view();
+                }
+                Ok(Response::UpgradePackageResult { name, output }) => {
+                    self.info_popup_text = output;
+                    self.show_info_popup = true;
+                    self.status_line = format!("brew upgrade finished for {}", name);
+                    self.refresh_active_view();
+                }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.status_line = String::from("Worker disconnected");
@@ -281,6 +376,7 @@ impl App {
     }
 
     fn apply_list(&mut self, list: BrewList) {
+        self.active_view = ActiveView::Installed;
         self.items.clear();
 
         for formula in list.formulas {
@@ -325,6 +421,39 @@ impl App {
                 self.items.len(),
                 visible_count
             );
+        }
+    }
+
+    fn apply_outdated_output(&mut self, output: String) {
+        self.items.clear();
+
+        for line in output.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let (name, version) = match trimmed.split_once(' ') {
+                Some((name, rest)) => (name.to_string(), rest.trim().to_string()),
+                None => (trimmed.to_string(), String::from("outdated")),
+            };
+
+            self.items.push(InstalledItem {
+                name,
+                version,
+                kind: "O",
+            });
+        }
+
+        self.items
+            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+        self.clamp_selection_to_visible_items();
+
+        if self.items.is_empty() {
+            self.status_line = String::from("No outdated packages");
+        } else {
+            self.status_line = format!("{} outdated packages", self.items.len());
         }
     }
 
@@ -384,6 +513,20 @@ impl App {
 
         let selected = self.list_state.selected().unwrap_or(0).min(len - 1);
         self.list_state.select(Some(selected));
+    }
+
+    fn current_list_title(&self) -> &'static str {
+        match self.active_view {
+            ActiveView::Installed => "Installed Packages",
+            ActiveView::Outdated => "Outdated Packages",
+        }
+    }
+
+    fn refresh_active_view(&mut self) {
+        match self.active_view {
+            ActiveView::Installed => self.request_list(),
+            ActiveView::Outdated => self.request_outdated(),
+        }
     }
 }
 

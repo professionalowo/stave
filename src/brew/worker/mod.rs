@@ -15,6 +15,10 @@ pub enum ListOption {
 pub enum Command {
     List(ListOption),
     Info(String),
+    Outdated,
+    Update,
+    Upgrade,
+    UpgradePackage { name: String, is_cask: bool },
     Shutdown,
 }
 
@@ -22,6 +26,10 @@ pub enum Command {
 pub enum Response {
     List(BrewList),
     Info(Info),
+    Outdated(String),
+    UpdateResult(String),
+    UpgradeResult(String),
+    UpgradePackageResult { name: String, output: String },
 }
 
 pub struct Worker {
@@ -50,6 +58,23 @@ impl Worker {
                 Command::List(option) => {
                     let brew_list = run::run_list(option)?;
                     self.output_tx.send(Response::List(brew_list))?;
+                }
+                Command::Outdated => {
+                    let output = run::run_outdated()?;
+                    self.output_tx.send(Response::Outdated(output))?;
+                }
+                Command::Update => {
+                    let output = run::run_update()?;
+                    self.output_tx.send(Response::UpdateResult(output))?;
+                }
+                Command::Upgrade => {
+                    let output = run::run_upgrade()?;
+                    self.output_tx.send(Response::UpgradeResult(output))?;
+                }
+                Command::UpgradePackage { name, is_cask } => {
+                    let output = run::run_upgrade_package(&name, is_cask)?;
+                    self.output_tx
+                        .send(Response::UpgradePackageResult { name, output })?;
                 }
             }
         }

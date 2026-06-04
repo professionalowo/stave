@@ -63,3 +63,71 @@ pub fn run_list(option: ListOption) -> Result<BrewList, CommandError> {
     let Output { ref stdout, .. } = cmd.output()?;
     serde_json::from_slice(stdout).map_err(CommandError::Serde)
 }
+
+pub fn run_outdated() -> Result<String, CommandError> {
+    run_text_command(["outdated"])
+}
+
+pub fn run_update() -> Result<String, CommandError> {
+    run_text_command(["update"])
+}
+
+pub fn run_upgrade_package(name: &str, is_cask: bool) -> Result<String, CommandError> {
+    let Output {
+        stdout,
+        stderr,
+        status,
+    } = if is_cask {
+        Command::new("brew")
+            .args(["upgrade", "--cask", name])
+            .output()?
+    } else {
+        Command::new("brew").args(["upgrade", name]).output()?
+    };
+
+    Ok(format_command_output(stdout, stderr, status))
+}
+
+pub fn run_upgrade() -> Result<String, CommandError> {
+    run_text_command(["upgrade"])
+}
+
+fn run_text_command<const N: usize>(args: [&str; N]) -> Result<String, CommandError> {
+    let Output {
+        stdout,
+        stderr,
+        status,
+    } = Command::new("brew").args(args).output()?;
+
+    Ok(format_command_output(stdout, stderr, status))
+}
+
+fn format_command_output(
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: std::process::ExitStatus,
+) -> String {
+
+    let mut text = String::new();
+
+    if !stdout.is_empty() {
+        text.push_str(&String::from_utf8_lossy(&stdout));
+    }
+
+    if !stderr.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&String::from_utf8_lossy(&stderr));
+    }
+
+    if text.trim().is_empty() {
+        text = "Command produced no output".to_string();
+    }
+
+    if !status.success() {
+        text.push_str(&format!("\n\nExit status: {}", status));
+    }
+
+    text
+}
