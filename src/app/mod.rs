@@ -9,7 +9,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
@@ -38,6 +38,7 @@ pub struct App {
     should_quit: bool,
     command_tx: mpsc::Sender<Command>,
     output_rx: mpsc::Receiver<Response>,
+    supports_color: bool,
     active_view: ActiveView,
     filter: InstalledFilter,
     items: Vec<InstalledItem>,
@@ -55,6 +56,7 @@ impl App {
             should_quit: false,
             command_tx,
             output_rx,
+            supports_color: terminal_supports_color(),
             active_view: ActiveView::Installed,
             filter: InstalledFilter::All,
             items: Vec::new(),
@@ -168,6 +170,7 @@ impl App {
         let header = Paragraph::new("Stave")
             .centered()
             .bold()
+            .style(self.brand_style())
             .block(Block::default().borders(Borders::BOTTOM));
         frame.render_widget(header, header_area);
 
@@ -179,22 +182,32 @@ impl App {
                 "1",
                 "Installed (All)",
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::All,
+            ))
+            .style(self.sidebar_item_style(
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::All,
             )),
             ListItem::new(sidebar_label(
                 "2",
                 "Installed (Formulae)",
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Formula,
+            ))
+            .style(self.sidebar_item_style(
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Formula,
             )),
             ListItem::new(sidebar_label(
                 "3",
                 "Installed (Casks)",
                 self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Cask,
+            ))
+            .style(self.sidebar_item_style(
+                self.active_view == ActiveView::Installed && self.filter == InstalledFilter::Cask,
             )),
             ListItem::new(" "),
-            ListItem::new(sidebar_label("o", "Outdated", self.active_view == ActiveView::Outdated)),
-            ListItem::new("u Update"),
-            ListItem::new("g Upgrade"),
-            ListItem::new("G Upgrade selected"),
+            ListItem::new(sidebar_label("o", "Outdated", self.active_view == ActiveView::Outdated))
+                .style(self.sidebar_item_style(self.active_view == ActiveView::Outdated)),
+            ListItem::new("u Update").style(self.sidebar_item_style(false)),
+            ListItem::new("g Upgrade").style(self.sidebar_item_style(false)),
+            ListItem::new("G Upgrade selected").style(self.sidebar_item_style(false)),
         ];
         let menu = List::new(menu_items).block(Block::default().title("Views / Functions").borders(Borders::ALL));
         frame.render_widget(menu, left_area);
@@ -213,6 +226,7 @@ impl App {
         let search = Paragraph::new(search_hint).block(
             Block::default()
                 .title("Search")
+                .style(self.muted_style())
                 .borders(Borders::ALL),
         );
         frame.render_widget(search, search_area);
@@ -245,14 +259,14 @@ impl App {
                     .title_bottom(self.status_line.clone())
                     .borders(Borders::ALL),
             )
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_style(self.selection_style())
             .highlight_symbol("> ");
         frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
         let help = Paragraph::new(
             "q: Quit  j/k or Arrows: Move  i: Info Popup  /: Search  Enter/Esc: End Search  1/2/3: Installed Filters  o: Outdated  u: Update  g: Upgrade all  G: Upgrade selected  r: Refresh",
         )
-            .style(Style::default().add_modifier(Modifier::DIM));
+            .style(self.muted_style());
         frame.render_widget(help, help_area);
 
         if self.show_info_popup {
@@ -522,12 +536,80 @@ impl App {
         }
     }
 
+    fn brand_style(&self) -> Style {
+        if self.supports_color {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::BOLD)
+        }
+    }
+
+    fn muted_style(&self) -> Style {
+        if self.supports_color {
+            Style::default().fg(Color::Gray)
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        }
+    }
+
+    fn selection_style(&self) -> Style {
+        if self.supports_color {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(198, 224, 214))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED)
+        }
+    }
+
+    fn sidebar_item_style(&self, active: bool) -> Style {
+        if !self.supports_color {
+            return Style::default();
+        }
+
+        if active {
+            Style::default().fg(Color::Rgb(248, 232, 164)).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        }
+    }
+
     fn refresh_active_view(&mut self) {
         match self.active_view {
             ActiveView::Installed => self.request_list(),
             ActiveView::Outdated => self.request_outdated(),
         }
     }
+}
+
+fn terminal_supports_color() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+
+    if matches!(std::env::var("TERM").ok().as_deref(), Some("dumb")) {
+        return false;
+    }
+
+    if let Ok(colorterm) = std::env::var("COLORTERM") {
+        if !colorterm.is_empty() {
+            return true;
+        }
+    }
+
+    matches!(
+        std::env::var("TERM").ok().as_deref(),
+        Some(term)
+            if term.contains("color")
+                || term.contains("xterm")
+                || term.contains("screen")
+                || term.contains("tmux")
+                || term.contains("kitty")
+                || term.contains("wezterm")
+                || term.contains("alacritty")
+                || term.contains("iterm")
+    )
 }
 
 fn sidebar_label(key: &str, label: &str, active: bool) -> String {
