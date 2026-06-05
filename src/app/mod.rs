@@ -36,6 +36,7 @@ struct InstalledItem {
 enum ActiveView {
     Installed,
     Outdated,
+    Search,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,8 @@ pub struct App {
     status_line: String,
     search_mode: bool,
     search_query: String,
+    remote_search_input_mode: bool,
+    remote_search_query: String,
     show_info_popup: bool,
     info_popup_text: String,
 }
@@ -69,6 +72,8 @@ impl App {
             status_line: String::from("Loading installed packages..."),
             search_mode: false,
             search_query: String::new(),
+            remote_search_input_mode: false,
+            remote_search_query: String::new(),
             show_info_popup: false,
             info_popup_text: String::new(),
         };
@@ -124,6 +129,30 @@ impl App {
             return;
         }
 
+        if self.remote_search_input_mode {
+            match event.code {
+                KeyCode::Esc => {
+                    self.remote_search_input_mode = false;
+                    self.status_line = String::from("Remote search cancelled");
+                }
+                KeyCode::Enter => {
+                    self.remote_search_input_mode = false;
+                    self.active_view = ActiveView::Search;
+                    self.request_search();
+                }
+                KeyCode::Backspace => {
+                    self.remote_search_query.pop();
+                    self.status_line = format!("Brew Search: {}", self.remote_search_query);
+                }
+                KeyCode::Char(c) => {
+                    self.remote_search_query.push(c);
+                    self.status_line = format!("Brew Search: {}", self.remote_search_query);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match event.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.select_next(),
@@ -131,6 +160,11 @@ impl App {
             KeyCode::Char('/') => {
                 self.search_mode = true;
                 self.status_line = String::from("Search mode: type to filter, Enter/Esc to finish");
+            }
+            KeyCode::Char('s') => {
+                self.remote_search_input_mode = true;
+                self.remote_search_query.clear();
+                self.status_line = String::from("Brew Search: ");
             }
             KeyCode::Char('1') => {
                 self.active_view = ActiveView::Installed;
@@ -147,7 +181,7 @@ impl App {
                 self.filter = InstalledFilter::Cask;
                 self.request_list();
             }
-            KeyCode::Char('r') => self.request_list(),
+            KeyCode::Char('r') => self.refresh_active_view(),
             KeyCode::Char('o') => {
                 self.active_view = ActiveView::Outdated;
                 self.request_outdated();
@@ -155,6 +189,8 @@ impl App {
             KeyCode::Char('u') => self.request_update(),
             KeyCode::Char('g') => self.request_upgrade(),
             KeyCode::Char('G') => self.request_upgrade_selected(),
+            KeyCode::Char('I') | KeyCode::Char('+') => self.request_install_selected(),
+            KeyCode::Char('X') | KeyCode::Char('x') | KeyCode::Char('-') => self.request_uninstall_selected(),
             KeyCode::Char('i') => {
                 if self.show_info_popup {
                     self.show_info_popup = false;
@@ -225,6 +261,17 @@ impl App {
             ListItem::new("u Update").style(self.theme.sidebar_style(false)),
             ListItem::new("g Upgrade").style(self.theme.sidebar_style(false)),
             ListItem::new("G Upgrade selected").style(self.theme.sidebar_style(false)),
+            ListItem::new(sidebar_label(
+                "s",
+                "Search",
+                self.active_view == ActiveView::Search,
+            ))
+            .style(
+                self.theme
+                    .sidebar_style(self.active_view == ActiveView::Search),
+            ),
+            ListItem::new("I Install selected").style(self.theme.sidebar_style(false)),
+            ListItem::new("x Uninstall selected").style(self.theme.sidebar_style(false)),
         ];
         let menu = List::new(menu_items).block(
             Block::default()
@@ -236,17 +283,19 @@ impl App {
         let [search_area, list_area] =
             Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(right_area);
 
-        let search_hint = if self.search_mode {
+        let search_hint = if self.remote_search_input_mode {
+            format!("Brew Search: {}_", self.remote_search_query)
+        } else if self.search_mode {
             format!("/{}", self.search_query)
         } else if self.search_query.is_empty() {
-            String::from("Press / to search")
+            String::from("Press / to local filter, s for remote search")
         } else {
             format!("Filter: {}", self.search_query)
         };
 
         let search = Paragraph::new(search_hint).block(
             Block::default()
-                .title("Search")
+                .title(if self.remote_search_input_mode { "Remote Search" } else { "Local Filter" })
                 .style(self.theme.accent_style())
                 .borders(Borders::ALL),
         );
@@ -362,7 +411,50 @@ impl App {
         {
             self.status_line = String::from("Failed to send package upgrade command to worker");
         } else {
-            self.status_line = format!("Upgrading {}...", name);
+            self.status_line = format!("Running brew upgrade for {}...", name);
+        }
+    }
+
+    fn request_search(&mut self) {
+        if self.remote_search_query.is_empty() {
+            self.status_line = String::from("Search query is empty");
+            return;
+        }
+        let query = self.remote_search_query.clone();
+        if self.command_tx.send(Command::Search(query.clone())).is_err() {
+            self.status_line = String::from("Failed to send search command to worker");
+        } else {
+            self.status_line = format!("Searching for '{}'...", query);
+        }
+    }
+
+    fn request_install_selected(&mut self) {
+        let Some(item) = self.selected_item() else {
+            self.status_line = String::from("No package selected");
+            return;
+        };
+
+        let name = item.name.clone();
+
+        if self.command_tx.send(Command::Install(name.clone())).is_err() {
+            self.status_line = String::from("Failed to send install command to worker");
+        } else {
+            self.status_line = format!("Running brew install for {}...", name);
+        }
+    }
+
+    fn request_uninstall_selected(&mut self) {
+        let Some(item) = self.selected_item() else {
+            self.status_line = String::from("No package selected");
+            return;
+        };
+
+        let name = item.name.clone();
+
+        if self.command_tx.send(Command::Uninstall(name.clone())).is_err() {
+            self.status_line = String::from("Failed to send uninstall command to worker");
+        } else {
+            self.status_line = format!("Running brew uninstall for {}...", name);
         }
     }
 
@@ -408,6 +500,21 @@ impl App {
                     self.info_popup_text = output;
                     self.show_info_popup = true;
                     self.status_line = format!("brew upgrade finished for {}", name);
+                    self.refresh_active_view();
+                }
+                Ok(Response::SearchResult(output)) => {
+                    self.apply_search_output(output);
+                }
+                Ok(Response::InstallResult { name, output }) => {
+                    self.info_popup_text = output;
+                    self.show_info_popup = true;
+                    self.status_line = format!("brew install finished for {}", name);
+                    self.refresh_active_view();
+                }
+                Ok(Response::UninstallResult { name, output }) => {
+                    self.info_popup_text = output;
+                    self.show_info_popup = true;
+                    self.status_line = format!("brew uninstall finished for {}", name);
                     self.refresh_active_view();
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
@@ -501,6 +608,31 @@ impl App {
         }
     }
 
+    fn apply_search_output(&mut self, output: String) {
+        self.items.clear();
+
+        for line in output.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("==>") {
+                continue;
+            }
+
+            self.items.push(InstalledItem {
+                name: trimmed.to_string(),
+                version: String::new(),
+                kind: "S",
+            });
+        }
+
+        self.clamp_selection_to_visible_items();
+
+        if self.items.is_empty() {
+            self.status_line = String::from("No packages found for search query");
+        } else {
+            self.status_line = format!("{} packages found", self.items.len());
+        }
+    }
+
     fn selected_item(&self) -> Option<&InstalledItem> {
         let idx = self.list_state.selected()?;
         let visible_indices = self.visible_item_indices();
@@ -563,6 +695,7 @@ impl App {
         match self.active_view {
             ActiveView::Installed => "Installed Packages",
             ActiveView::Outdated => "Outdated Packages",
+            ActiveView::Search => "Search Results",
         }
     }
 
@@ -570,6 +703,7 @@ impl App {
         match self.active_view {
             ActiveView::Installed => self.request_list(),
             ActiveView::Outdated => self.request_outdated(),
+            ActiveView::Search => self.request_search(),
         }
     }
 }

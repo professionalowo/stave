@@ -93,6 +93,19 @@ pub fn run_upgrade() -> Result<String, CommandError> {
     run_text_command(["upgrade"])
 }
 
+pub fn run_search(query: &str) -> Result<String, CommandError> {
+    let Output { stdout, .. } = Command::new("brew").args(["search", query]).output()?;
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+pub fn run_install(name: &str) -> Result<String, CommandError> {
+    run_text_command(["install", name])
+}
+
+pub fn run_uninstall(name: &str) -> Result<String, CommandError> {
+    run_text_command(["uninstall", name])
+}
+
 fn run_text_command<const N: usize>(args: [&str; N]) -> Result<String, CommandError> {
     let Output {
         stdout,

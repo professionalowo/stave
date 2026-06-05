@@ -19,6 +19,9 @@ pub enum Command {
     Update,
     Upgrade,
     UpgradePackage { name: String, is_cask: bool },
+    Search(String),
+    Install(String),
+    Uninstall(String),
     Shutdown,
 }
 
@@ -30,6 +33,9 @@ pub enum Response {
     UpdateResult(String),
     UpgradeResult(String),
     UpgradePackageResult { name: String, output: String },
+    SearchResult(String),
+    InstallResult { name: String, output: String },
+    UninstallResult { name: String, output: String },
 }
 
 pub struct Worker {
@@ -75,6 +81,18 @@ impl Worker {
                     let output = run::run_upgrade_package(&name, is_cask)?;
                     self.output_tx
                         .send(Response::UpgradePackageResult { name, output })?;
+                }
+                Command::Search(query) => {
+                    let output = run::run_search(&query)?;
+                    self.output_tx.send(Response::SearchResult(output))?;
+                }
+                Command::Install(name) => {
+                    let output = run::run_install(&name)?;
+                    self.output_tx.send(Response::InstallResult { name, output })?;
+                }
+                Command::Uninstall(name) => {
+                    let output = run::run_uninstall(&name)?;
+                    self.output_tx.send(Response::UninstallResult { name, output })?;
                 }
             }
         }
