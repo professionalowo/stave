@@ -3,7 +3,7 @@ use std::{sync::mpsc, time::Duration};
 use crate::app::theme::Theme;
 use brew::{
     bindings::{BrewList, Info, InfoEntry},
-    worker::{Command, ListOption, Response},
+    worker::{Command, ListOption, PackageKind, Response},
 };
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
@@ -429,7 +429,11 @@ impl App {
             .command_tx
             .send(Command::UpgradePackage {
                 name: name.clone(),
-                is_cask,
+                kind: if is_cask {
+                    PackageKind::Cask
+                } else {
+                    PackageKind::Formula
+                },
             })
             .is_err()
         {

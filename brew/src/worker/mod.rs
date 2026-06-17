@@ -18,11 +18,17 @@ pub enum Command {
     Outdated,
     Update,
     Upgrade,
-    UpgradePackage { name: String, is_cask: bool },
+    UpgradePackage { name: String, kind: PackageKind },
     Search(String),
     Install(String),
     Uninstall(String),
     Shutdown,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PackageKind {
+    Formula,
+    Cask,
 }
 
 #[derive(Debug)]
@@ -77,8 +83,8 @@ impl Worker {
                     let output = run::run_upgrade()?;
                     self.output_tx.send(Response::UpgradeResult(output))?;
                 }
-                Command::UpgradePackage { name, is_cask } => {
-                    let output = run::run_upgrade_package(&name, is_cask)?;
+                Command::UpgradePackage { name, kind } => {
+                    let output = run::run_upgrade_package(&name, kind)?;
                     self.output_tx
                         .send(Response::UpgradePackageResult { name, output })?;
                 }

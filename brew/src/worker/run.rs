@@ -1,3 +1,5 @@
+use crate::worker::PackageKind;
+
 use super::{BrewList, Info, ListOption, Response};
 use std::{
     io,
@@ -73,12 +75,12 @@ pub fn run_update() -> Result<String, CommandError> {
     run_text_command(["update"])
 }
 
-pub fn run_upgrade_package(name: &str, is_cask: bool) -> Result<String, CommandError> {
+pub fn run_upgrade_package(name: &str, kind: PackageKind) -> Result<String, CommandError> {
     let Output {
         stdout,
         stderr,
         status,
-    } = if is_cask {
+    } = if kind == PackageKind::Cask {
         Command::new("brew")
             .args(["upgrade", "--cask", name])
             .output()?
