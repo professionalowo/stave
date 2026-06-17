@@ -24,10 +24,30 @@ enum InstalledFilter {
 }
 
 #[derive(Debug, Clone)]
-struct InstalledItem {
+struct BrewItem {
     name: String,
     version: String,
-    kind: &'static str,
+    kind: BrewItemKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum BrewItemKind {
+    Formula,
+    Cask,
+    Outdated,
+    SearchResult,
+}
+
+impl std::fmt::Display for BrewItemKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            BrewItemKind::Formula => "F",
+            BrewItemKind::Cask => "C",
+            BrewItemKind::Outdated => "O",
+            BrewItemKind::SearchResult => "S",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -45,7 +65,7 @@ pub struct App {
     theme: Theme,
     active_view: ActiveView,
     filter: InstalledFilter,
-    items: Vec<InstalledItem>,
+    items: Vec<BrewItem>,
     list_state: ListState,
     status_line: String,
     search_mode: bool,
@@ -403,7 +423,7 @@ impl App {
         };
 
         let name = item.name.clone();
-        let is_cask = item.kind == "C";
+        let is_cask = item.kind == BrewItemKind::Cask;
 
         if self
             .command_tx
@@ -552,10 +572,10 @@ impl App {
                 .or_else(|| formula.versions.first().cloned())
                 .unwrap_or_else(|| String::from("-"));
 
-            self.items.push(InstalledItem {
+            self.items.push(BrewItem {
                 name: formula.name,
                 version,
-                kind: "F",
+                kind: BrewItemKind::Formula,
             });
         }
 
@@ -566,10 +586,10 @@ impl App {
                 .cloned()
                 .unwrap_or_else(|| String::from("-"));
 
-            self.items.push(InstalledItem {
+            self.items.push(BrewItem {
                 name: cask.token,
                 version,
-                kind: "C",
+                kind: BrewItemKind::Cask,
             });
         }
 
@@ -605,10 +625,10 @@ impl App {
                 None => (trimmed.to_string(), String::from("outdated")),
             };
 
-            self.items.push(InstalledItem {
+            self.items.push(BrewItem {
                 name,
                 version,
-                kind: "O",
+                kind: BrewItemKind::Outdated,
             });
         }
 
@@ -633,10 +653,10 @@ impl App {
                 continue;
             }
 
-            self.items.push(InstalledItem {
+            self.items.push(BrewItem {
                 name: trimmed.to_string(),
                 version: String::new(),
-                kind: "S",
+                kind: BrewItemKind::SearchResult,
             });
         }
 
@@ -649,7 +669,7 @@ impl App {
         }
     }
 
-    fn selected_item(&self) -> Option<&InstalledItem> {
+    fn selected_item(&self) -> Option<&BrewItem> {
         let idx = self.list_state.selected()?;
         let visible_indices = self.visible_item_indices();
         let item_idx = *visible_indices.get(idx)?;
