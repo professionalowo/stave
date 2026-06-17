@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrewList {
-    #[serde(rename = "formulae", alias = "formulas", default)]
-    pub formulas: Vec<Formula>,
+    #[serde(default)]
+    pub formulae: Vec<Formula>,
     #[serde(default)]
     pub casks: Vec<Cask>,
 }

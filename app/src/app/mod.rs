@@ -546,7 +546,7 @@ impl App {
         self.active_view = ActiveView::Installed;
         self.items.clear();
 
-        for formula in list.formulas {
+        for formula in list.formulae {
             let version = formula
                 .linked_version
                 .or_else(|| formula.versions.first().cloned())
