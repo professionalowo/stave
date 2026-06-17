@@ -69,12 +69,36 @@ impl Theme {
             if !loaded {
                 if let Ok(file) = fs::File::open(&path) {
                     if let Ok(config) = serde_yaml::from_reader::<_, ThemeConfig>(file) {
-                        if let Some(c) = config.header { if let Ok(color) = Color::from_str(&c) { palette.header = color; } }
-                        if let Some(c) = config.selection_bg { if let Ok(color) = Color::from_str(&c) { palette.selection_bg = color; } }
-                        if let Some(c) = config.selection_fg { if let Ok(color) = Color::from_str(&c) { palette.selection_fg = color; } }
-                        if let Some(c) = config.sidebar_active { if let Ok(color) = Color::from_str(&c) { palette.sidebar_active = color; } }
-                        if let Some(c) = config.sidebar_inactive { if let Ok(color) = Color::from_str(&c) { palette.sidebar_inactive = color; } }
-                        if let Some(c) = config.accent { if let Ok(color) = Color::from_str(&c) { palette.accent = color; } }
+                        if let Some(c) = config.header {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.header = color;
+                            }
+                        }
+                        if let Some(c) = config.selection_bg {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.selection_bg = color;
+                            }
+                        }
+                        if let Some(c) = config.selection_fg {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.selection_fg = color;
+                            }
+                        }
+                        if let Some(c) = config.sidebar_active {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.sidebar_active = color;
+                            }
+                        }
+                        if let Some(c) = config.sidebar_inactive {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.sidebar_inactive = color;
+                            }
+                        }
+                        if let Some(c) = config.accent {
+                            if let Ok(color) = Color::from_str(&c) {
+                                palette.accent = color;
+                            }
+                        }
                         loaded = true;
                     }
                 }
@@ -114,7 +138,9 @@ impl Theme {
         }
 
         if active {
-            Style::default().fg(self.palette.sidebar_active).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(self.palette.sidebar_active)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.palette.sidebar_inactive)
         }

@@ -1,11 +1,9 @@
 use std::{sync::mpsc, time::Duration};
 
-use crate::{
-    app::theme::Theme,
-    brew::{
-        bindings::{BrewList, Info, InfoEntry},
-        worker::{Command, ListOption, Response},
-    },
+use crate::app::theme::Theme;
+use brew::{
+    bindings::{BrewList, Info, InfoEntry},
+    worker::{Command, ListOption, Response},
 };
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
@@ -190,7 +188,9 @@ impl App {
             KeyCode::Char('g') => self.request_upgrade(),
             KeyCode::Char('G') => self.request_upgrade_selected(),
             KeyCode::Char('I') | KeyCode::Char('+') => self.request_install_selected(),
-            KeyCode::Char('X') | KeyCode::Char('x') | KeyCode::Char('-') => self.request_uninstall_selected(),
+            KeyCode::Char('X') | KeyCode::Char('x') | KeyCode::Char('-') => {
+                self.request_uninstall_selected()
+            }
             KeyCode::Char('i') => {
                 if self.show_info_popup {
                     self.show_info_popup = false;
@@ -295,7 +295,11 @@ impl App {
 
         let search = Paragraph::new(search_hint).block(
             Block::default()
-                .title(if self.remote_search_input_mode { "Remote Search" } else { "Local Filter" })
+                .title(if self.remote_search_input_mode {
+                    "Remote Search"
+                } else {
+                    "Local Filter"
+                })
                 .style(self.theme.accent_style())
                 .borders(Borders::ALL),
         );
@@ -421,7 +425,11 @@ impl App {
             return;
         }
         let query = self.remote_search_query.clone();
-        if self.command_tx.send(Command::Search(query.clone())).is_err() {
+        if self
+            .command_tx
+            .send(Command::Search(query.clone()))
+            .is_err()
+        {
             self.status_line = String::from("Failed to send search command to worker");
         } else {
             self.status_line = format!("Searching for '{}'...", query);
@@ -436,7 +444,11 @@ impl App {
 
         let name = item.name.clone();
 
-        if self.command_tx.send(Command::Install(name.clone())).is_err() {
+        if self
+            .command_tx
+            .send(Command::Install(name.clone()))
+            .is_err()
+        {
             self.status_line = String::from("Failed to send install command to worker");
         } else {
             self.status_line = format!("Running brew install for {}...", name);
@@ -451,7 +463,11 @@ impl App {
 
         let name = item.name.clone();
 
-        if self.command_tx.send(Command::Uninstall(name.clone())).is_err() {
+        if self
+            .command_tx
+            .send(Command::Uninstall(name.clone()))
+            .is_err()
+        {
             self.status_line = String::from("Failed to send uninstall command to worker");
         } else {
             self.status_line = format!("Running brew uninstall for {}...", name);

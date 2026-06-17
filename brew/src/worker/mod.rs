@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use crate::brew::bindings::{BrewList, Info};
+use crate::bindings::{BrewList, Info};
 
 mod run;
 
@@ -88,11 +88,13 @@ impl Worker {
                 }
                 Command::Install(name) => {
                     let output = run::run_install(&name)?;
-                    self.output_tx.send(Response::InstallResult { name, output })?;
+                    self.output_tx
+                        .send(Response::InstallResult { name, output })?;
                 }
                 Command::Uninstall(name) => {
                     let output = run::run_uninstall(&name)?;
-                    self.output_tx.send(Response::UninstallResult { name, output })?;
+                    self.output_tx
+                        .send(Response::UninstallResult { name, output })?;
                 }
             }
         }

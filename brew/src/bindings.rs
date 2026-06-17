@@ -21,7 +21,7 @@ pub struct Formula {
 pub struct Cask {
     pub token: String,
     pub versions: Vec<String>,
-    pub pinned_version: Option<String>
+    pub pinned_version: Option<String>,
 }
 
 pub type Info = Vec<InfoEntry>;

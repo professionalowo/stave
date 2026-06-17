@@ -121,7 +121,6 @@ fn format_command_output(
     stderr: Vec<u8>,
     status: std::process::ExitStatus,
 ) -> String {
-
     let mut text = String::new();
 
     if !stdout.is_empty() {

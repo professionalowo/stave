@@ -1,10 +1,8 @@
-use std::{sync::mpsc, thread};
 use app::App;
-use color_eyre::Result;
 use brew::worker;
+use color_eyre::Result;
+use std::{sync::mpsc, thread};
 mod app;
-mod brew;
-
 
 fn main() -> Result<()> {
     let (main_tx, main_rx) = mpsc::channel::<worker::Command>();
